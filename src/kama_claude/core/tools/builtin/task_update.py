@@ -45,21 +45,6 @@ class TaskUpdateTool(BaseTool):
     def __init__(self, task_manager: TaskManager) -> None:
         self._manager = task_manager
 
-    # 更新任务并返回 JSON 字符串
+    # S6: 调用 TaskManager.update，返回更新后的 task JSON；ValueError 变成 is_error。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        task_id = int(str(params["task_id"]))
-        status: TaskStatus | None = params.get("status")  # type: ignore[assignment]
-        raw_add: list[object] = list(params.get("add_blocked_by") or [])  # type: ignore[call-overload]
-        raw_rem: list[object] = list(params.get("remove_blocked_by") or [])  # type: ignore[call-overload]
-        add_blocked = [int(str(x)) for x in raw_add]
-        remove_blocked = [int(str(x)) for x in raw_rem]
-        try:
-            task = self._manager.update(
-                task_id,
-                status=status,
-                add_blocked_by=add_blocked or None,
-                remove_blocked_by=remove_blocked or None,
-            )
-            return ToolResult(content=json.dumps(task.to_dict(), ensure_ascii=False))
-        except ValueError as exc:
-            return ToolResult(content=str(exc), is_error=True, error_type="runtime_error")
+        raise NotImplementedError

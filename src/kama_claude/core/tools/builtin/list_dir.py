@@ -40,40 +40,6 @@ class ListDirTool(BaseTool):
         "required": [],
     }
 
-    # 以树状格式列出目录内容，深度和条数有上限
+    # S3: 树状列出相对目录；禁止 ..；不存在/非目录抛对应异常；限制深度与条数。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        p = ListDirParams.model_validate(params)
-        path_str = p.path
-        max_depth = p.max_depth
-
-        if ".." in Path(path_str).parts:
-            raise PermissionError(f"path traversal not allowed: {path_str}")
-
-        root = Path(path_str)
-        if not root.exists():
-            raise FileNotFoundError(f"no such directory: {path_str}")
-        if not root.is_dir():
-            raise NotADirectoryError(f"not a directory: {path_str}")
-
-        lines: list[str] = [str(root) + "/"]
-        count = 0
-
-        def _walk(directory: Path, depth: int, prefix: str) -> None:
-            nonlocal count
-            if depth > max_depth or count >= _MAX_ENTRIES:
-                return
-            entries = sorted(directory.iterdir(), key=lambda e: (e.is_file(), e.name))
-            for i, entry in enumerate(entries):
-                if count >= _MAX_ENTRIES:
-                    lines.append(f"{prefix}... (truncated)")
-                    return
-                connector = "└── " if i == len(entries) - 1 else "├── "
-                suffix = "/" if entry.is_dir() else ""
-                lines.append(f"{prefix}{connector}{entry.name}{suffix}")
-                count += 1
-                if entry.is_dir() and depth < max_depth:
-                    extension = "    " if i == len(entries) - 1 else "│   "
-                    _walk(entry, depth + 1, prefix + extension)
-
-        _walk(root, 1, "")
-        return ToolResult(content="\n".join(lines))
+        raise NotImplementedError

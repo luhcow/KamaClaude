@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,6 @@ from kama_claude.core.events.bus import EventBus
 from kama_claude.core.llm.base import LLMProvider
 from kama_claude.core.tools.invocation import invoke_tool
 from kama_claude.core.tools.registry import ToolRegistry
-import logging
 
 if TYPE_CHECKING:
     from kama_claude.core.compact.compactor import Compactor
@@ -44,89 +44,11 @@ class AgentLoop:
         self._compact_threshold = compact_threshold
         self._session_id = session_id
 
-    # 驱动 plan→act→observe 循环直到上下文终止；CancelledError 向上传播
+    # S1: 驱动 plan→act→observe：调 LLM、把 assistant blocks 写入 context、tool_use 时 invoke_tool、
+    #     按 stop_reason 标记 success / exceeded_max_steps；LLM 异常标 llm_error；CancelledError 先 mark_failed("cancelled") 再上抛。
+    #     工具失败不得终止循环，要把 is_error 结果回填给模型。
+    # S2: 每步发布 StepStartedEvent / StepFinishedEvent。
+    # S5: 把 permission_manager 与 session_id 传给 invoke_tool。
+    # S6: 在 tool_use 且 run 未结束、usage.context_pct 达阈值时调用 compactor.compact。
     async def run(self, context: ExecutionContext) -> None:
-        while not context.is_done():
-            context.step += 1
-            await self._bus.publish(
-                StepStartedEvent(run_id=context.run_id, step=context.step, ts=_now())
-            )
-
-            # [plan] call LLM — API errors terminate the run
-            try:
-                response = await self._provider.chat(
-                    messages=context.messages,
-                    tool_schemas=self._registry.tool_schemas(),
-                    bus=self._bus,
-                    run_id=context.run_id,
-                    step=context.step,
-                    system=context.system_prompt(
-                        "You are a helpful AI assistant. "
-                        "Use the available tools to complete the user's goal. "
-                        "When the goal is fully achieved, respond with a final answer "
-                        "and do not call any more tools."
-                    ),
-                )
-            except asyncio.CancelledError:
-                context.mark_failed("cancelled")
-                raise
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "LLM call failed run_id=%s step=%d", context.run_id, context.step
-                )
-                context.mark_failed("llm_error")
-                break
-
-            # [observe] append assistant content blocks to context
-            # thinking blocks must come first and be preserved verbatim for extended thinking mode
-            blocks: list[dict[str, object]] = list(response.thinking_blocks)
-            if response.text:
-                blocks.append({"type": "text", "text": response.text})
-            for tc in response.tool_calls:
-                blocks.append(
-                    {"type": "tool_use", "id": tc.id, "name": tc.name, "input": tc.input}
-                )
-            context.add_assistant_message(blocks)
-
-            # [act] execute each requested tool; errors become tool results so loop continues
-            if response.stop_reason == "tool_use":
-                for tc in response.tool_calls:
-                    result = await invoke_tool(
-                        self._registry, tc, self._bus, context.run_id,
-                        permission_manager=self._permission_manager,
-                        session_id=self._session_id,
-                    )
-                    context.add_tool_result(tc.id, result.content, is_error=result.is_error)
-            elif response.stop_reason == "max_tokens" and response.tool_calls:
-                # Output token limit hit mid-tool-call; input is incomplete.
-                # Add synthetic error results so the conversation stays balanced.
-                for tc in response.tool_calls:
-                    context.add_tool_result(
-                        tc.id,
-                        "Error: output token limit reached before this tool call could be completed. "
-                        "Please break the task into smaller steps and try again.",
-                        is_error=True,
-                    )
-
-            # Termination check — end_turn wins over max_steps if both hit on same step
-            if response.stop_reason == "end_turn":
-                context.result = response.text or ""
-                context.mark_success()
-            elif context.step >= context.max_steps:
-                context.mark_failed("exceeded_max_steps")
-
-            # 工具结果追加完毕（messages 末尾为 user）后检查压缩，仅在 run 继续时触发
-            # 此时压缩结果 [user_summary, assistant_ack] 对下一次 LLM 调用是合法输入
-            if (
-                not context.is_done()
-                and response.stop_reason == "tool_use"
-                and self._compactor is not None
-                and self._compact_threshold > 0
-                and response.usage is not None
-                and response.usage.context_pct >= self._compact_threshold
-            ):
-                await self._compactor.compact(context, self._provider)
-
-            await self._bus.publish(
-                StepFinishedEvent(run_id=context.run_id, step=context.step, ts=_now())
-            )
+        raise NotImplementedError

@@ -13,32 +13,18 @@ class TraceWriter:
         self._queue: asyncio.Queue[TraceRecord] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
 
-    # 创建目录、启动后台 drain task
+    # S1: 创建父目录并启动后台 _drain task。
     async def start(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._task = asyncio.create_task(self._drain())
+        raise NotImplementedError
 
-    # 等待队列清空后取消 drain task
+    # S1: join 队列后取消 drain task。
     async def stop(self) -> None:
-        await self._queue.join()
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        raise NotImplementedError
 
-    # 非阻塞地将 record 放入写入队列
+    # S1: 非阻塞把 record 放进队列。
     def emit(self, record: TraceRecord) -> None:
-        self._queue.put_nowait(record)
+        raise NotImplementedError
 
-    # 持续从队列读取 record 并追加写入文件
+    # S1: 循环从队列取 record，追加写成 JSONL 并 flush。
     async def _drain(self) -> None:
-        with open(self._path, "a") as f:
-            while True:
-                record = await self._queue.get()
-                try:
-                    f.write(record.model_dump_json() + "\n")
-                    f.flush()
-                finally:
-                    self._queue.task_done()
+        raise NotImplementedError

@@ -77,6 +77,15 @@ Agent 这个东西，光看文章还不够。
 * 配置 Skill 和 MCP
 * 在 TUI 里看到工具调用、事件流、权限审批和上下文水位
 
+### 怎么学（填空骨架）
+
+`src/kama_claude/` 是学生面对的挖空代码：类型和函数签名还在，教学目标函数体是 `raise NotImplementedError`，旁边有 `S0`–`S7` 教学注释。完整参考在 `reference/kama_claude/`。现有 `tests/` 直接 import 发运包判题。详见 [TEACHING.md](TEACHING.md)。
+
+```bash
+uv run pytest tests/unit/test_starter_blanks.py -v          # 骨架仍是挖空
+PYTHONPATH=reference uv run pytest tests/unit -v -m "not starter_blanks"
+```
+
 ### KamaClaude 长什么样？
 
 KamaClaude 的最终形态是这样的：

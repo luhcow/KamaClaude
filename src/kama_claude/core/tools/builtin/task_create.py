@@ -37,14 +37,6 @@ class TaskCreateTool(BaseTool):
     def __init__(self, task_manager: TaskManager) -> None:
         self._manager = task_manager
 
-    # 创建任务并返回 JSON 字符串
+    # S6: 调用 TaskManager.create，成功返回 task JSON；ValueError 变成 is_error。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        subject = str(params["subject"])
-        description = str(params.get("description") or "")
-        raw_blocked: list[object] = list(params.get("blocked_by") or [])  # type: ignore[call-overload]
-        blocked_by = [int(str(x)) for x in raw_blocked]
-        try:
-            task = self._manager.create(subject, description, blocked_by)
-            return ToolResult(content=json.dumps(task.to_dict(), ensure_ascii=False))
-        except ValueError as exc:
-            return ToolResult(content=str(exc), is_error=True, error_type="runtime_error")
+        raise NotImplementedError

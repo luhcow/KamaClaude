@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from kama_claude.core.mcp.client import McpClient, McpServerUnavailableError, McpToolDef, McpToolError
+from kama_claude.core.mcp.client import (
+    McpClient,
+    McpServerUnavailableError,
+    McpToolDef,
+    McpToolError,
+)
 from kama_claude.core.tools.base import BaseTool, ToolResult
 
 
@@ -21,26 +26,6 @@ class McpTool(BaseTool):
             tool_def.input_schema or {"type": "object", "properties": {}}
         )
 
-    # 调用 MCP server 上的工具，连接不可用或工具执行失败时返回 is_error=True
+    # S7: 调 MCP call_tool；连接不可用 / 工具错误 / 其它异常都返回 is_error=True，不要往外抛。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        try:
-            content = await self._client.call_tool(self._tool_def.name, dict(params))
-            return ToolResult(content=content)
-        except McpServerUnavailableError as exc:
-            return ToolResult(
-                content=f"mcp server '{self._server_name}' unavailable: {exc}",
-                is_error=True,
-                error_type="runtime_error",
-            )
-        except McpToolError as exc:
-            return ToolResult(
-                content=f"mcp tool '{self.name}' error: {exc}",
-                is_error=True,
-                error_type="runtime_error",
-            )
-        except Exception as exc:
-            return ToolResult(
-                content=f"mcp tool '{self.name}' unexpected error: {exc}",
-                is_error=True,
-                error_type="runtime_error",
-            )
+        raise NotImplementedError

@@ -35,14 +35,6 @@ class NoteSaveTool(BaseTool):
         self._session_id = session_id
         self._run_id = run_id
 
-    # 将非空 content 追加到 session notes.md
+    # S4: 把非空 content 追加到当前 session 的 notes.md；空内容返回 is_error。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        content = NoteSaveParams.model_validate(params).content.strip()
-        if not content:
-            return ToolResult(
-                content="empty content",
-                is_error=True,
-                error_type="runtime_error",
-            )
-        self._store.append_note(self._session_id, content, self._run_id)
-        return ToolResult(content="saved")
+        raise NotImplementedError

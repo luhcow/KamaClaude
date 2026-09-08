@@ -22,44 +22,9 @@ class StdoutPrinter:
             print()
             self._inline = False
 
-    # 根据事件 type 字段分发并格式化打印到 stdout/stderr
+    # S1: 按 event type 把 run/step/llm.token/tool.* 进度打印到终端；token 要保持同一行。
     async def handle(self, event: dict[str, Any]) -> None:
-        t = event.get("type", "")
-
-        if t == "run.started":
-            self._run_start = time.monotonic()
-            print(f"[run] {event.get('run_id', '')}")
-
-        elif t == "step.started":
-            self._ensure_newline()
-            print(f"[step {event.get('step')}] planning...")
-
-        elif t == "llm.token":
-            print(event.get("token", ""), end="", flush=True)
-            self._inline = True
-
-        elif t == "tool.call_started":
-            self._ensure_newline()
-            params_str = json.dumps(event.get("params", {}), ensure_ascii=False)
-            print(f"[tool] {event.get('tool_name', '')} {params_str}")
-
-        elif t == "tool.call_finished":
-            print(f"[tool] {event.get('tool_name', '')} ✓  {event.get('elapsed_ms')}ms")
-
-        elif t == "tool.call_failed":
-            print(
-                f"[tool] {event.get('tool_name', '')} ✗  {event.get('error_message', '')}",
-                file=sys.stderr,
-            )
-
-        elif t == "step.finished":
-            self._ensure_newline()
-            print(f"[step {event.get('step')}] done")
-
-        elif t == "run.finished":
-            self._ensure_newline()
-            elapsed = time.monotonic() - self._run_start
-            print(f"[run] {event.get('status', '')}  {event.get('steps')} steps  {elapsed:.1f}s")
+        raise NotImplementedError
 
 
 # 异步核心：连接 daemon，订阅事件，触发 run，等待 run.finished

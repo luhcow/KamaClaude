@@ -51,6 +51,6 @@ class HandlerError(Exception):
         self.data = data
 
 
-# 构造一个 JSON-RPC 错误响应对象
+# S0: 用 id/code/message/data 构造 JsonRpcError；data 默认 None；id 允许 None（解析失败时）。
 def make_error(id: str | None, code: int, message: str, data: Any = None) -> JsonRpcError:
-    return JsonRpcError(id=id, error=JsonRpcErrorObject(code=code, message=message, data=data))
+    raise NotImplementedError

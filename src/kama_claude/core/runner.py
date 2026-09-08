@@ -76,7 +76,11 @@ class AgentRunner:
         # 跨 run 共享的后台 subagent 任务注册表
         self._task_registry = BackgroundTaskRegistry()
 
-    # 构建工具注册表，注入 TaskManager（任务工具共享同一实例）；可选注入 SpawnAgentTool
+    # S1: 注册 ReadFileTool。
+    # S3: 追加 bash / write_file / list_dir。
+    # S4: 有 session+store+run_id 时注册 note_save。
+    # S6: 注册 task_* 工具（共享同一个 TaskManager）。
+    # S7: 注册 spawn_agent / agent_result，以及 mcp_manager.get_tools()；尊重 tool_whitelist。
     def _build_registry(
         self,
         task_manager: TaskManager,
@@ -90,56 +94,18 @@ class AgentRunner:
         session_id: str = "",
         tool_whitelist: list[str] | None = None,
     ) -> ToolRegistry:
-        allowed: set[str] | None = set(tool_whitelist) if tool_whitelist else None
+        raise NotImplementedError
 
-        def _ok(name: str) -> bool:
-            return allowed is None or name in allowed
-
-        registry = ToolRegistry()
-        for t in [ReadFileTool(), BashTool(), WriteFileTool(), ListDirTool()]:
-            if _ok(t.name):
-                registry.register(t)
-        for t in [
-            TaskCreateTool(task_manager),
-            TaskUpdateTool(task_manager),
-            TaskListTool(task_manager),
-            TaskGetTool(task_manager),
-        ]:
-            if _ok(t.name):
-                registry.register(t)
-        if session is not None and store is not None and run_id is not None:
-            note_tool = NoteSaveTool(store, session.id, run_id)
-            if _ok(note_tool.name):
-                registry.register(note_tool)
-        if provider is not None and bus is not None and run_id is not None:
-            runs_dir = child_runs_dir or self._runs_dir
-            if _ok("spawn_agent"):
-                registry.register(
-                    SpawnAgentTool(
-                        provider=provider,
-                        parent_bus=bus,
-                        parent_run_id=run_id,
-                        permission_manager=self._permission_manager,
-                        max_steps=self._config.agent.max_steps,
-                        task_registry=self._task_registry,
-                        runs_dir=runs_dir,
-                        session_id=session_id,
-                        depth=0,
-                    )
-                )
-            if _ok("agent_result"):
-                registry.register(AgentResultTool(self._task_registry))
-        if self._mcp_manager is not None:
-            for mcp_tool in self._mcp_manager.get_tools():
-                if _ok(mcp_tool.name):
-                    registry.register(mcp_tool)
-        return registry
-
-    # 执行一次完整的 agent run（委托给 run_and_capture，忽略返回值）
+    # S1: 委托 run_and_capture，忽略返回值。
     async def run(self, goal: str, *, run_id: str | None = None) -> None:
-        await self.run_and_capture(goal, run_id=run_id)
+        raise NotImplementedError
 
-    # 执行 agent run 并返回 RunOutcome（含最终文字结果）
+    # S1: 建 run 目录与 EventWriter，发 RunStarted/Finished，构造 ExecutionContext + AgentLoop 并执行。
+    # S3: 加载 ~/.kama/context.md 与 .kama/context.md 写入 context。
+    # S4: 若传入 session/store，从 thread 预填 messages、run 后 append_messages。
+    # S5: 把 permission_manager 传给 AgentLoop。
+    # S6: 构造 Compactor，按 config.compaction.auto_threshold 传给 loop。
+    # S7: 支持 system_prompt_override 与 tool_whitelist。
     async def run_and_capture(
         self,
         goal: str,
@@ -150,113 +116,4 @@ class AgentRunner:
         system_prompt_override: str | None = None,
         tool_whitelist: list[str] | None = None,
     ) -> RunOutcome:
-        run_id = run_id or new_run_id()
-        if session is not None and store is not None:
-            run_path = store.runs_dir(session.id) / run_id
-            history = store.read_messages(session.id)
-            notes = store.read_notes(session.id)
-        else:
-            run_path = self._runs_dir / run_id
-            history = [{"role": "user", "content": goal}]
-            notes = ""
-        run_path.mkdir(parents=True, exist_ok=True)
-
-        global_ctx = load_context_file(Path("~/.kama/context.md").expanduser())
-        project_ctx = load_context_file(Path(".kama/context.md"))
-
-        task_manager = TaskManager(run_path / ".tasks")
-
-        bus = self._bus if self._bus is not None else EventBus()
-        for h in self._extra_handlers:
-            bus.subscribe(h)
-
-        context = ExecutionContext(
-            run_id=run_id,
-            goal=goal,
-            max_steps=self._config.agent.max_steps,
-            prefill_messages=history,
-            session_notes=notes,
-            global_context=global_ctx,
-            project_context=project_ctx,
-            system_prompt_override=system_prompt_override,
-        )
-        prefill_len = len(history)
-
-        async with EventWriter(run_path / "events.jsonl") as writer:
-            writer.subscribe(bus)
-            await bus.publish(RunStartedEvent(run_id=run_id, goal=goal, ts=_now()))
-
-            cancelled = False
-            try:
-                provider: LLMProvider = self._provider or AnthropicProvider(
-                    self._config.llm.default_model
-                )
-                if self._trace is not None:
-                    provider = TracingProvider(
-                        provider,
-                        self._trace,
-                        include_payload=self._config.trace.include_llm_payload,
-                    )
-                session_id_str = session.id if session is not None else ""
-                child_runs_dir = (
-                    store.runs_dir(session.id)
-                    if session is not None and store is not None
-                    else self._runs_dir
-                )
-                registry = self._build_registry(
-                    task_manager,
-                    session=session,
-                    store=store,
-                    run_id=run_id,
-                    provider=provider,
-                    bus=bus,
-                    child_runs_dir=child_runs_dir,
-                    session_id=session_id_str,
-                    tool_whitelist=tool_whitelist,
-                )
-                session_dir = (
-                    store.session_dir(session.id)
-                    if session is not None and store is not None
-                    else run_path
-                )
-                compactor = Compactor(bus, session_dir, session_id_str)
-                loop = AgentLoop(
-                    provider, registry, bus,
-                    permission_manager=self._permission_manager,
-                    compactor=compactor,
-                    compact_threshold=self._config.compaction.auto_threshold,
-                    session_id=session_id_str,
-                )
-                await loop.run(context)
-            except asyncio.CancelledError:
-                cancelled = True
-                if not context.is_done():
-                    context.mark_failed("cancelled")
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "agent run failed run_id=%s step=%d", run_id, context.step
-                )
-                if not context.is_done():
-                    context.mark_failed("llm_error")
-
-            await bus.publish(
-                RunFinishedEvent(
-                    run_id=run_id,
-                    status=context.status,
-                    reason=context.reason,
-                    steps=context.step,
-                    ts=_now(),
-                )
-            )
-
-        if session is not None and store is not None:
-            store.append_messages(session.id, context.messages[prefill_len:], run_id=run_id)
-
-        if cancelled:
-            raise asyncio.CancelledError()
-
-        return RunOutcome(
-            status=context.status,
-            result=context.result,
-            reason=context.reason,
-        )
+        raise NotImplementedError

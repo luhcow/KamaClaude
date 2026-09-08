@@ -23,8 +23,9 @@ from kama_claude.core.skills.loader import SkillLoader
 from kama_claude.core.transport.socket_client import IpcError, SocketClient
 
 
+# S2: 超长截断并追加省略号；不超过 n 则原样返回。
 def _preview(s: str, n: int) -> str:
-    return s[:n] + "…" if len(s) > n else s
+    raise NotImplementedError
 
 
 
@@ -33,20 +34,9 @@ def _params_str(params: dict[str, Any]) -> str:
     return json.dumps(params, ensure_ascii=False, indent=2)
 
 
-# 从工具参数中提取最适合摘要展示的关键字段
+# S2: 按工具名挑关键字段做摘要（read_file/bash/note_save 等），再用 _preview 截断。
 def _param_summary(tool_name: str, params: dict[str, Any], max_len: int = 72) -> str:
-    keys_by_tool = {
-        "read_file": ("path",),
-        "write_file": ("path",),
-        "list_dir": ("path", "max_depth"),
-        "bash": ("command",),
-        "note_save": ("content",),
-    }
-    keys = keys_by_tool.get(tool_name, ())
-    parts = [f"{key}={params[key]!r}" for key in keys if key in params]
-    if not parts:
-        parts = [f"{key}={value!r}" for key, value in list(params.items())[:2]]
-    return _preview(", ".join(parts), max_len)
+    raise NotImplementedError
 
 
 class LLMStreamBlock(Static):
@@ -60,20 +50,13 @@ class LLMStreamBlock(Static):
         self._text = ""
         self._finalized = False
 
-    # 追加一个 token 并刷新显示
+    # S2: 追加一个 token 并刷新显示；已 finalize 则忽略。
     def append_token(self, token: str) -> None:
-        if self._finalized:
-            return
-        self._text += token
-        self.update(self._text)
+        raise NotImplementedError
 
-    # 将累积文本渲染为 Markdown，供流式块结束后显示
+    # S2: 将累积文本渲染为 Rich Markdown；只能 finalize 一次。
     def finalize_markdown(self) -> None:
-        if self._finalized:
-            return
-        self._finalized = True
-        if self._text.strip():
-            self.update(Markdown(self._text, code_theme="monokai"))
+        raise NotImplementedError
 
 
 class ToolCallBlock(Widget):
@@ -101,30 +84,13 @@ class ToolCallBlock(Widget):
         yield Static(self._summary(), classes="summary")
         yield Static("", classes="detail")
 
-    # 生成摘要行文本
+    # S2: 生成摘要行；note_save 成功完成时显示 remembered。
     def _summary(self) -> str:
-        if self._tool_name == "note_save" and self._finished and not self._is_error:
-            return f"  [green]remembered[/green]  [dim]{self._elapsed_ms}ms[/dim]"
+        raise NotImplementedError
 
-        params_pre = _param_summary(self._tool_name, self._params)
-        line = f"  [dim]tool[/dim] [bold]{self._tool_name}[/bold]"
-        if params_pre:
-            line += f"  [dim]{params_pre}[/dim]"
-        if self._finished:
-            color = "red" if self._is_error else "green"
-            status = "failed" if self._is_error else "done"
-            hint = "  [dim](click to expand)[/dim]" if self._output else ""
-            line += f"  [{color}]{status}[/{color}]  [dim]{self._elapsed_ms}ms[/dim]{hint}"
-        return line
-
-    # 工具调用完成时更新结果并刷新摘要（widget 未挂载时跳过 DOM 更新）
+    # S2: 写入 output/elapsed/is_error 并标记 finished；已挂载时刷新摘要。
     def set_result(self, output: str, elapsed_ms: int, *, is_error: bool = False) -> None:
-        self._output = output
-        self._elapsed_ms = elapsed_ms
-        self._is_error = is_error
-        self._finished = True
-        if self.children:
-            self.query_one(".summary", Static).update(self._summary())
+        raise NotImplementedError
 
     # 点击时切换展开/折叠状态
     def on_click(self) -> None:
@@ -610,29 +576,10 @@ class KamaTuiApp(App[None]):
                 self._append(Static("[yellow]warning: failed to close session[/yellow]"))
         self.exit()
 
-    # 将输入框提交内容发送给当前 chat session；用 worker 发送，避免 await 阻塞 App 消息泵
+    # S4: 提交用户输入：清空输入框、进入 busy、追加 user turn，worker 发送 session.send_message。
+    # S6: 识别 /compact 走手动压缩。
     async def on_chat_text_area_submitted(self, event: ChatTextArea.Submitted) -> None:
-        content = event.value.strip()
-        if not content:
-            return
-        # 检测 /compact 指令
-        if content == "/compact":
-            event.text_area.text = ""
-            if self._client is not None and self._session_id is not None and not self._busy:
-                self.run_worker(self._do_compact(), name="compact", exclusive=False)
-            return
-        if self._client is None or self._session_id is None or self._busy:
-            self._append(Static("[yellow]agent busy or disconnected[/yellow]", classes="log-line"))
-            return
-        self._busy = True
-        prompt = event.text_area
-        prompt.text = ""
-        prompt.disabled = True
-        prompt.read_only = False
-        prompt.border_title = "agent is working..."
-        self._append(Static(f"[bold]>[/bold] {content}", classes="user-turn"))
-        self._update_header("running")
-        self.run_worker(self._do_send_message(content), name="send_message", exclusive=False)
+        raise NotImplementedError
 
     # 在 worker 中执行手动压缩命令，完成后显示结果横幅
     async def _do_compact(self) -> None:
@@ -835,224 +782,21 @@ class KamaTuiApp(App[None]):
             self._update_header("disconnected")
             await asyncio.sleep(2)
 
-    # 根据事件 type 路由到对应渲染逻辑；捕获异常防止 socket loop 因单个事件崩溃
+    # S2: 按 type 路由事件到 TUI 渲染；捕获异常以免 socket loop 崩溃。
+    # S4: 处理 session.waiting_for_input / session.closed，恢复或禁用输入框。
+    # S5: 处理 permission.requested，插入审批卡片。
+    # S7: 处理 skill.invoked / subagent.started / subagent.finished。
     def _handle_event(self, event: dict[str, Any]) -> None:
-        try:
-            self._handle_event_inner(event)
-        except Exception:
-            log.exception("_handle_event crashed  event_type=%s", event.get("type", "?"))
+        raise NotImplementedError
 
-    # 实际的事件路由逻辑
+    # S2: 实现事件路由（llm.token 累积到同一 LLMStreamBlock、非 token 先 _break_llm、
+    #     run.started/finished、tool.call_started/finished、未知 type 静默忽略）。
+    # S4: session.waiting_for_input / session.closed 恢复或禁用输入框。
+    # S5: permission.requested 插入审批卡片；permission.denied 清理 pending。
+    # S6: llm.usage 水位条与 context.compacted 横幅。
+    # S7: skill.invoked / subagent.started / subagent.finished。
     def _handle_event_inner(self, event: dict[str, Any]) -> None:
-        t = event.get("type", "")
-
-        if t == "llm.token":
-            token = event.get("token", "")
-            if self._current_llm is None:
-                llm_block = LLMStreamBlock()
-                self._append(llm_block)
-                self._current_llm = llm_block
-            self._current_llm.append_token(token)
-            return
-
-        self._break_llm()
-
-        if t == "session.waiting_for_input":
-            self._busy = False
-            prompt = self._prompt()
-            if prompt is not None:
-                prompt.disabled = False
-                prompt.read_only = False
-                prompt.border_title = "type a message — enter to send, ⌘/⇧/⌥+enter for newline"
-                prompt.focus()
-            self._update_header("ready")
-
-        elif t == "session.closed":
-            self._busy = False
-            prompt = self._prompt()
-            if prompt is not None:
-                prompt.disabled = True
-                prompt.read_only = False
-                prompt.border_title = "session closed"
-            self._update_header("disconnected")
-
-        elif t == "run.started":
-            run_id = event.get("run_id", "")
-            goal = event.get("goal", "")
-            self._append(Static(
-                f"[dim]run[/dim]  [cyan]{run_id}[/cyan]  [dim]{_preview(goal, 96)}[/dim]",
-                classes="run-header",
-            ))
-
-        elif t == "skill.invoked":
-            skill_name = event.get("skill_name", "")
-            arguments = event.get("arguments", "")
-            args_preview = _preview(arguments, 80) if arguments else ""
-            args_part = f"  [dim]{args_preview}[/dim]" if args_preview else ""
-            self._append(Static(
-                f"[bold cyan]/{skill_name}[/bold cyan]{args_part}",
-                classes="log-line",
-            ))
-
-        elif t == "subagent.started":
-            run_id = event.get("run_id", "")
-            description = event.get("description", "")
-            self._subagent_run_ids[run_id] = description
-            self._subagent_start_times[run_id] = time.monotonic()
-            short_id = run_id[:8] if len(run_id) >= 8 else run_id
-            self._append(Static(
-                f"[dim]┌─[/dim] [cyan]{_preview(description, 72)}[/cyan]  [dim]{short_id}[/dim]",
-                classes="log-line",
-            ))
-
-        elif t == "subagent.finished":
-            run_id = event.get("run_id", "")
-            status = event.get("status", "")
-            description = self._subagent_run_ids.pop(run_id, event.get("description", ""))
-            start = self._subagent_start_times.pop(run_id, None)
-            elapsed = f"  [dim]{time.monotonic() - start:.1f}s[/dim]" if start is not None else ""
-            desc_part = f"[cyan]{_preview(description, 72)}[/cyan]{elapsed}"
-            if status == "success":
-                self._append(Static(
-                    f"[dim]└─[/dim] [bold green]✓[/bold green] {desc_part}",
-                    classes="log-line",
-                ))
-            else:
-                self._append(Static(
-                    f"[dim]└─[/dim] [bold red]✗[/bold red] {desc_part}",
-                    classes="log-line",
-                ))
-
-        elif t == "step.started":
-            run_id = event.get("run_id", "")
-            if run_id in self._subagent_run_ids:
-                return
-            step = event.get("step", "")
-            self._append(Static(
-                f"[dim]step {step}[/dim]",
-                classes="step-divider",
-            ))
-
-        elif t == "tool.call_started":
-            tool_use_id = str(event.get("tool_use_id", ""))
-            tool_name = str(event.get("tool_name", ""))
-            params = event.get("params") or {}
-            run_id = event.get("run_id", "")
-            tc_block = ToolCallBlock(tool_name, params)
-            if run_id in self._subagent_run_ids:
-                tc_block.styles.padding = (0, 2, 0, 6)
-            self._pending_tool_blocks[tool_use_id] = tc_block
-            self._append(tc_block)
-
-        elif t == "tool.call_finished":
-            tool_use_id = str(event.get("tool_use_id", ""))
-            elapsed_ms = int(event.get("elapsed_ms") or 0)
-            output = str(event.get("output") or "")
-            if tool_use_id in self._pending_tool_blocks:
-                tc_done = self._pending_tool_blocks.pop(tool_use_id)
-                tc_done.set_result(output, elapsed_ms)
-
-        elif t == "tool.call_failed":
-            tool_use_id = str(event.get("tool_use_id", ""))
-            elapsed_ms = int(event.get("elapsed_ms") or 0)
-            error_msg = str(event.get("error_message") or "")
-            if tool_use_id in self._pending_tool_blocks:
-                tc_done = self._pending_tool_blocks.pop(tool_use_id)
-                tc_done.set_result(error_msg, elapsed_ms, is_error=True)
-
-        elif t == "run.finished":
-            status = event.get("status", "")
-            steps = event.get("steps", 0)
-            reason = event.get("reason") or ""
-            if status == "success":
-                self._append(Static(
-                    f"[bold green]✓ completed[/bold green]  [dim]{steps} steps[/dim]",
-                    classes="run-ok",
-                ))
-            else:
-                detail = f"  [dim]{reason}[/dim]" if reason else ""
-                self._append(Static(
-                    f"[bold red]✗ failed[/bold red]{detail}  [dim]{steps} steps[/dim]",
-                    classes="run-err",
-                ))
-
-        elif t == "llm.usage":
-            run_id = event.get("run_id", "")
-            if run_id in self._subagent_run_ids:
-                return
-            pct = float(event.get("context_pct") or 0.0)
-            self._last_context_pct = pct
-            ctx_bar = self._render_ctx_bar(pct)
-            self._append(Static(
-                f"[dim]  tokens  "
-                f"in={event.get('input_tokens')} "
-                f"out={event.get('output_tokens')} "
-                f"cache={event.get('cache_read_input_tokens')}[/dim]"
-                f"  {ctx_bar}",
-                classes="usage",
-            ))
-
-        elif t == "context.compacted":
-            orig = event.get("original_tokens", 0)
-            summary = event.get("summary_tokens", 0)
-            self._last_context_pct = 0.0
-            self._append(Static(
-                f"[bold cyan]⚡ Context compacted[/bold cyan]"
-                f"  [dim]original≈{orig} tokens → summary={summary} tokens[/dim]",
-                classes="log-line",
-            ))
-
-        elif t == "permission.requested":
-            tool_use_id = str(event.get("tool_use_id", ""))
-            tool_name = str(event.get("tool_name", ""))
-            param_preview = str(event.get("param_preview", ""))
-            try:
-                _focused_repr = repr(self.focused)
-            except Exception:
-                _focused_repr = "?"
-            log.info(
-                "permission.requested tool=%s id=%s  app.focused=%s",
-                tool_name, tool_use_id, _focused_repr,
-            )
-            perm_block = PermissionBlock(tool_use_id, tool_name, param_preview)
-            self._pending_permission_blocks[tool_use_id] = perm_block
-            prompt = self._prompt()
-            if prompt is not None:
-                prompt.disabled = True
-                prompt.border_title = "permission required"
-            self._append(perm_block)
-            select = PermissionSelect(tool_use_id)
-            self._mount_permission_select(select)
-            log.debug("PermissionSelect mounted before #prompt  pending=%d", len(self._pending_permission_blocks))
-
-        elif t == "permission.denied":
-            # 处理超时或断连等非用户交互触发的 deny（用户主动 deny 已由 on_permission_select_decided 处理）
-            tool_use_id = str(event.get("tool_use_id", ""))
-            decision = str(event.get("decision", "denied"))
-            if tool_use_id in self._pending_permission_blocks:
-                perm_block = self._pending_permission_blocks.pop(tool_use_id)
-                perm_block._resolve(decision)
-                try:
-                    select = self.query_one(PermissionSelect)
-                    select.remove()
-                except Exception:
-                    pass
-                if not self._pending_permission_blocks:
-                    p = self._prompt()
-                    if p is not None:
-                        p.disabled = False
-                        p.read_only = False
-                        p.border_title = "type a message — enter to send, ⌘/⇧/⌥+enter for newline"
-                        p.focus()
-
-        elif t == "log.line":
-            level = event.get("level", "INFO")
-            color = "bold red" if level == "ERROR" else ("yellow" if level == "WARNING" else "dim")
-            self._append(Static(
-                f"[{color}]{level}[/{color}]  "
-                f"[dim]{event.get('source', '')}[/dim]  {event.get('message', '')}",
-                classes="log-line",
-            ))
+        raise NotImplementedError
 
 
 # TUI 入口：读取配置并启动 KamaTuiApp

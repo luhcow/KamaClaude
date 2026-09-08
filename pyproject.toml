@@ -50,6 +50,8 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["E501"]   # 测试文件的中文注释允许超过行宽限制
 "scripts/**/*.py" = ["E501"] # 脚本文件的文档字符串允许超过行宽限制
+# 学生填空树保留教学用 import / 未使用形参；教学注释与 TUI 模块级 logger 允许超长/后置 import
+"src/kama_claude/**/*.py" = ["F401", "F841", "E501", "E402"]
 
 # ---- Mypy：严格类型检查 ----
 [tool.mypy]
@@ -64,4 +66,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests that call the real Anthropic API (require ANTHROPIC_API_KEY)",
+    "starter_blanks: asserts student-facing teaching entries raise NotImplementedError",
 ]

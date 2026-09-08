@@ -69,120 +69,30 @@ class Compactor:
         self._session_dir = session_dir
         self._session_id = session_id
 
-    # 压缩 ExecutionContext.messages，就地替换消息列表并写 summary 文件
+    # S6: 调用 compact_messages，成功则把 context.messages 换成 [user_summary, assistant_ack]，
+    #     写 summary 文件并发布 ContextCompactedEvent。
     async def compact(
         self,
         context: ExecutionContext,
         provider: LLMProvider,
         focus: str = "",
     ) -> CompactionResult | None:
-        result = await self.compact_messages(context.messages, provider, focus=focus)
-        if result is None:
-            return None
+        raise NotImplementedError
 
-        context.messages = [
-            {"role": "user", "content": result.summary_text},
-            {"role": "assistant", "content": "Understood, I'll continue from this summary."},
-        ]
-        self._write_summary(result.summary_text)
-        await self._bus.publish(
-            ContextCompactedEvent(
-                session_id=self._session_id,
-                run_id=context.run_id,
-                original_tokens=result.original_token_estimate,
-                summary_tokens=result.summary_tokens,
-                ts=_now(),
-            )
-        )
-        logger.info(
-            "context compacted session=%s run=%s original≈%d summary=%d tokens",
-            self._session_id, context.run_id,
-            result.original_token_estimate, result.summary_tokens,
-        )
-        return result
-
-    # 纯函数式压缩：接收消息列表，返回 CompactionResult；失败时返回 None
+    # S6: 把 messages 交给 LLM 生成摘要；失败或空摘要返回 None，不要抛给 loop。
     async def compact_messages(
         self,
         messages: list[dict[str, Any]],
         provider: LLMProvider,
         focus: str = "",
     ) -> CompactionResult | None:
-        from kama_claude.core.events.bus import EventBus as _Bus
+        raise NotImplementedError
 
-        original_estimate = sum(
-            len(str(m.get("content", ""))) for m in messages
-        ) // 4  # 粗略 token 估算（字符数 / 4）
-
-        history_text = _messages_to_text(messages)
-        prompt = _COMPACT_PROMPT
-        if focus.strip():
-            prompt += f"\n\nIMPORTANT: Pay special attention to: {focus.strip()}"
-
-        compress_request: list[dict[str, object]] = [
-            {"role": "user", "content": f"{prompt}\n\n---\n\n{history_text}"}
-        ]
-
-        try:
-            silent_bus = _Bus()
-            response = await provider.chat(
-                messages=compress_request,
-                tool_schemas=[],
-                bus=silent_bus,
-                run_id="compact",
-                step=0,
-                system="You are a helpful assistant that summarizes conversations.",
-            )
-        except Exception:
-            logger.exception("compactor: LLM call failed, skipping compaction")
-            return None
-
-        summary_text = response.text.strip()
-        if not summary_text:
-            logger.warning("compactor: LLM returned empty summary, skipping compaction")
-            return None
-
-        summary_tokens = response.usage.output_tokens if response.usage else len(summary_text) // 4
-
-        return CompactionResult(
-            summary_text=summary_text,
-            original_token_estimate=original_estimate,
-            summary_tokens=summary_tokens,
-        )
-
-    # 将摘要文本写入 session 目录的 summary_<ts>.md
+    # S6: 将摘要写入 session_dir/summary_<ts>.md，写失败只记日志。
     def _write_summary(self, text: str) -> None:
-        try:
-            self._session_dir.mkdir(parents=True, exist_ok=True)
-            path = self._session_dir / f"summary_{_ts_compact()}.md"
-            path.write_text(text, encoding="utf-8")
-        except Exception:
-            logger.exception("compactor: failed to write summary file")
+        raise NotImplementedError
 
 
-# 将消息列表序列化为可供 LLM 阅读的纯文本
+# S6: 把 messages 编成可供压缩 prompt 阅读的纯文本（含 tool_use / tool_result 块）。
 def _messages_to_text(messages: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for msg in messages:
-        role = msg.get("role", "unknown").upper()
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            parts.append(f"[{role}]\n{content}")
-        elif isinstance(content, list):
-            blocks: list[str] = []
-            for block in content:
-                btype = block.get("type", "")
-                if btype == "text":
-                    blocks.append(block.get("text", ""))
-                elif btype == "tool_use":
-                    blocks.append(
-                        f"<tool_call name={block.get('name')} id={block.get('id')}>\n"
-                        f"{block.get('input', {})}\n</tool_call>"
-                    )
-                elif btype == "tool_result":
-                    blocks.append(
-                        f"<tool_result id={block.get('tool_use_id')}>\n"
-                        f"{block.get('content', '')}\n</tool_result>"
-                    )
-            parts.append(f"[{role}]\n" + "\n".join(blocks))
-    return "\n\n".join(parts)
+    raise NotImplementedError

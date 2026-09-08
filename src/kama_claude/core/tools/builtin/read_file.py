@@ -33,18 +33,6 @@ class ReadFileTool(BaseTool):
         "required": ["path"],
     }
 
-    # 读取文件内容；超 512KB 截断；禁止 .. 路径遍历
+    # S1: 读相对路径文本；禁止 .. 遍历（PermissionError）；不存在让 FileNotFoundError 冒泡；超 512KB 截断并追加 [truncated]。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        path_str = ReadFileParams.model_validate(params).path
-
-        if ".." in Path(path_str).parts:
-            raise PermissionError(f"path traversal not allowed: {path_str}")
-
-        path = Path(path_str)
-        raw = path.read_bytes()  # raises FileNotFoundError if absent
-        truncated = len(raw) > _MAX_BYTES
-        text = raw[:_MAX_BYTES].decode("utf-8", errors="replace")
-        if truncated:
-            text += "\n[truncated]"
-
-        return ToolResult(content=text)
+        raise NotImplementedError

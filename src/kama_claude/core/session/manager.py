@@ -52,146 +52,28 @@ class SessionManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._skill_loader = SkillLoader()
 
-    # 创建新 session 并写入 meta.json
+    # S4: 创建 session，写 meta，发布 SessionCreatedEvent。
     async def create(self, mode: SessionMode, title: str = "") -> Session:
-        sid = f"sess-{uuid.uuid4().hex[:12]}"
-        ts = _now()
-        session = Session(
-            id=sid,
-            mode=mode,
-            status="active",
-            title=title,
-            created_at=ts,
-            updated_at=ts,
-            run_ids=[],
-        )
-        self._sessions[sid] = session
-        self._locks[sid] = asyncio.Lock()
-        self._store.write_meta(session)
-        await self._bus.publish(SessionCreatedEvent(session_id=sid, mode=mode, ts=ts))
-        return session
+        raise NotImplementedError
 
-    # 处理用户消息，追加 thread 并启动一次 agent run
+    # S4: 校验状态与 busy 锁，追加 user 消息，启动 runner.run_and_capture；
+    #     one_shot 结束后 closed，chat 模式 waiting_for_input。
+    # S7: 若 content 以 / 开头，解析 skill，展开 prompt / system_prompt_override / tool_whitelist。
     async def send_message(self, sid: str, content: str, *, run_id: str | None = None) -> str:
-        session = self._get_session(sid)
-        lock = self._locks[sid]
-        if lock.locked():
-            raise HandlerError(SESSION_BUSY, "session busy")
+        raise NotImplementedError
 
-        async with lock:
-            if session.status == "closed":
-                raise HandlerError(SESSION_CLOSED, "session already closed")
-
-            if session.status == "waiting_for_input":
-                await self._bus.publish(SessionResumedEvent(session_id=sid, ts=_now()))
-
-            self._store.append_message(sid, "user", content)
-            await self._bus.publish(
-                SessionMessageReceivedEvent(session_id=sid, content=content, ts=_now())
-            )
-
-            if not session.title:
-                session.title = content[:40]
-
-            run_id = run_id or new_run_id()
-            session.run_ids.append(run_id)
-            session.updated_at = _now()
-            self._store.write_meta(session)
-
-            # Skill 解析：检测 "/" 前缀，展开为系统提示覆盖和工具白名单
-            goal = content
-            system_prompt_override: str | None = None
-            tool_whitelist: list[str] | None = None
-            if content.startswith("/"):
-                parts = content[1:].split(None, 1)
-                skill_name = parts[0]
-                arguments = parts[1] if len(parts) > 1 else ""
-                skill = self._skill_loader.resolve(skill_name)
-                if skill is not None:
-                    goal = self._skill_loader.render_prompt(skill, arguments)
-                    system_prompt_override = skill.system_prompt_template
-                    tool_whitelist = skill.allowed_tools or None
-                    await self._bus.publish(
-                        SkillInvokedEvent(
-                            skill_name=skill_name,
-                            arguments=arguments,
-                            run_id=run_id,
-                            ts=_now(),
-                        )
-                    )
-
-            runner = self._runner_factory()
-            await runner.run_and_capture(
-                goal,
-                run_id=run_id,
-                session=session,
-                store=self._store,
-                system_prompt_override=system_prompt_override,
-                tool_whitelist=tool_whitelist,
-            )
-
-            session.updated_at = _now()
-            if session.mode == "one_shot":
-                session.status = "closed"
-                await self._bus.publish(SessionClosedEvent(session_id=sid, ts=session.updated_at))
-            else:
-                session.status = "waiting_for_input"
-                await self._bus.publish(
-                    SessionWaitingForInputEvent(
-                        session_id=sid,
-                        last_run_id=run_id,
-                        ts=session.updated_at,
-                    )
-                )
-            self._store.write_meta(session)
-            return run_id
-
-    # 关闭指定 session 并更新 meta.json
+    # S4: 关闭 session 并发布 SessionClosedEvent。
     async def close(self, sid: str) -> None:
-        session = self._get_session(sid)
-        lock = self._locks[sid]
-        if lock.locked():
-            raise HandlerError(SESSION_BUSY, "session busy")
-        async with lock:
-            session.status = "closed"
-            session.updated_at = _now()
-            self._store.write_meta(session)
-            await self._bus.publish(SessionClosedEvent(session_id=sid, ts=session.updated_at))
+        raise NotImplementedError
 
-    # 手动压缩指定 session 的 thread，将摘要持久化写入 thread.jsonl
+    # S6: 手动压缩 thread，write_compacted 成 summary 消息对，返回 SessionCompactResult。
     async def compact(self, sid: str, focus: str = "") -> Any:
-        self._get_session(sid)
-        lock = self._locks[sid]
-        if lock.locked():
-            raise HandlerError(SESSION_BUSY, "session busy")
-        if self._provider is None:
-            raise HandlerError(-32020, "provider not available for compaction")
-        async with lock:
-            from kama_claude.core.bus.commands import SessionCompactResult
-            from kama_claude.core.compact.compactor import Compactor
-            messages = self._store.read_messages(sid)
-            session_dir = self._store.session_dir(sid)
-            compactor = Compactor(self._bus, session_dir, sid)
-            result = await compactor.compact_messages(messages, self._provider, focus=focus)
-            if result is None:
-                raise HandlerError(-32021, "compaction failed or not beneficial")
-            self._store.write_compacted(sid, [
-                {"role": "user", "content": result.summary_text},
-                {"role": "assistant", "content": "Understood, I'll continue from this summary."},
-            ])
-            return SessionCompactResult(
-                summary_tokens=result.summary_tokens,
-                saved_tokens=max(0, result.original_token_estimate - result.summary_tokens),
-            )
+        raise NotImplementedError
 
-    # 读取指定 session 的完整 thread 历史
+    # S4: 返回指定 session 的完整 thread。
     async def get_history(self, sid: str) -> list[dict[str, Any]]:
-        self._get_session(sid)
-        return self._store.read_messages(sid)
+        raise NotImplementedError
 
-    # 从内存索引取 session，不存在时抛 JSON-RPC 结构化错误
+    # S4: 内存索引取 session，不存在抛 HandlerError(SESSION_NOT_FOUND)。
     def _get_session(self, sid: str) -> Session:
-        session = self._sessions.get(sid)
-        if session is None:
-            raise HandlerError(SESSION_NOT_FOUND, "session not found")
-        return session
+        raise NotImplementedError

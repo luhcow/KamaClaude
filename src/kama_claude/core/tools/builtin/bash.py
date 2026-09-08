@@ -39,43 +39,7 @@ class BashTool(BaseTool):
         "required": ["command"],
     }
 
-    # 在子进程中执行 shell 命令，合并 stdout/stderr，超时或非零退出码时返回错误
+    # S3: 用 create_subprocess_shell 执行 command，合并 stdout/stderr；超时 kill 并返回 error_type=timeout；
+    #     非零退出码 is_error；输出超 64KB 截断。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        p = BashParams.model_validate(params)
-        command = p.command
-        timeout = p.timeout
-
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            try:
-                stdout_bytes, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
-                )
-            except TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                return ToolResult(
-                    content=f"[timeout after {timeout}s]",
-                    is_error=True,
-                    error_type="timeout",
-                )
-        except Exception as exc:
-            return ToolResult(content=str(exc), is_error=True, error_type="runtime_error")
-
-        output = stdout_bytes.decode("utf-8", errors="replace")
-        truncated = len(stdout_bytes) > _MAX_OUTPUT_BYTES
-        if truncated:
-            output = output[:_MAX_OUTPUT_BYTES] + "\n[truncated]"
-
-        returncode = proc.returncode or 0
-        if returncode != 0:
-            return ToolResult(
-                content=f"[exit {returncode}]\n{output}",
-                is_error=True,
-                error_type="runtime_error",
-            )
-        return ToolResult(content=output or "[no output]")
+        raise NotImplementedError

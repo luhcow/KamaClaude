@@ -24,11 +24,6 @@ class TaskGetTool(BaseTool):
     def __init__(self, task_manager: TaskManager) -> None:
         self._manager = task_manager
 
-    # 获取任务详情并返回 JSON 字符串
+    # S6: 按 task_id 读取任务并返回 JSON；找不到变成 is_error。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        task_id = int(str(params["task_id"]))
-        try:
-            task = self._manager.get(task_id)
-            return ToolResult(content=json.dumps(task.to_dict(), ensure_ascii=False))
-        except ValueError as exc:
-            return ToolResult(content=str(exc), is_error=True, error_type="runtime_error")
+        raise NotImplementedError

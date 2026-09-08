@@ -16,50 +16,22 @@ class McpServerManager:
         self._clients: dict[str, McpClient] = {}
         self._tools: list[McpTool] = []
 
-    # 依次连接每个 MCP server，发现工具后缓存供后续 registry 使用；失败时记录日志并跳过
+    # S7: 按配置连接每个 server、list_tools 后包装成 McpTool；单个失败记日志并跳过。
     async def start_all(self, servers: list[McpServerConfig]) -> None:
-        for cfg in servers:
-            try:
-                client = await self._connect(cfg)
-                tool_defs = await client.list_tools()
-                for tool_def in tool_defs:
-                    self._tools.append(McpTool(client, cfg.name, tool_def))
-                self._clients[cfg.name] = client
-                log.info(
-                    "mcp: server '%s' connected, %d tool(s) discovered",
-                    cfg.name, len(tool_defs),
-                )
-            except Exception:
-                log.exception("mcp: server '%s' failed to start, skipping", cfg.name)
+        raise NotImplementedError
 
-    # 将所有已发现的 MCP 工具注册到指定 registry
+    # S7: 把已发现的 MCP 工具 register 到给定 registry。
     def register_tools(self, registry: ToolRegistry) -> None:
-        for tool in self._tools:
-            registry.register(tool)
+        raise NotImplementedError
 
-    # 返回已发现的 MCP 工具列表（用于 runner 每次 run 时注入新 registry）
+    # S7: 返回已发现工具的拷贝列表。
     def get_tools(self) -> list[McpTool]:
-        return list(self._tools)
+        raise NotImplementedError
 
-    # 关闭所有 MCP 连接并终止 stdio 子进程
+    # S7: 关闭全部 client 并清空 _clients。
     async def stop_all(self) -> None:
-        for name, client in list(self._clients.items()):
-            try:
-                await client.close()
-                log.info("mcp: server '%s' closed", name)
-            except Exception:
-                log.warning("mcp: error closing server '%s'", name)
-        self._clients.clear()
+        raise NotImplementedError
 
-    # 根据 transport 类型建立连接
+    # S7: 按 transport=stdio|tcp 建立 McpClient 连接。
     async def _connect(self, cfg: McpServerConfig) -> McpClient:
-        client = McpClient()
-        if cfg.transport == "stdio":
-            if not cfg.command:
-                raise ValueError(f"mcp server '{cfg.name}': stdio transport requires 'command'")
-            await client.connect_stdio(cfg.command, cfg.args, cfg.env or None)
-        elif cfg.transport == "tcp":
-            await client.connect_tcp(cfg.host, cfg.port)
-        else:
-            raise ValueError(f"mcp server '{cfg.name}': unknown transport '{cfg.transport}'")
-        return client
+        raise NotImplementedError

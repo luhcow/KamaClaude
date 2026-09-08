@@ -20,6 +20,6 @@ class TaskListTool(BaseTool):
     def __init__(self, task_manager: TaskManager) -> None:
         self._manager = task_manager
 
-    # 返回格式化的任务列表摘要
+    # S6: 返回 TaskManager.format_list() 文本。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        return ToolResult(content=self._manager.format_list())
+        raise NotImplementedError

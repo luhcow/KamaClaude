@@ -39,25 +39,6 @@ class WriteFileTool(BaseTool):
         "required": ["path", "content"],
     }
 
-    # 写入文件内容；超 1MB 拒绝；禁止 .. 路径遍历；自动创建父目录
+    # S3: 写相对路径文本；禁止 .. 遍历；超 1MB 返回 is_error；自动创建父目录。
     async def invoke(self, params: dict[str, object]) -> ToolResult:
-        p = WriteFileParams.model_validate(params)
-        path_str = p.path
-        content = p.content
-
-        if ".." in Path(path_str).parts:
-            raise PermissionError(f"path traversal not allowed: {path_str}")
-
-        encoded = content.encode("utf-8")
-        if len(encoded) > _MAX_BYTES:
-            return ToolResult(
-                content=f"content too large: {len(encoded)} bytes (limit 1 MB)",
-                is_error=True,
-                error_type="runtime_error",
-            )
-
-        path = Path(path_str)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-        return ToolResult(content=f"wrote {len(encoded)} bytes to {path_str}")
+        raise NotImplementedError
